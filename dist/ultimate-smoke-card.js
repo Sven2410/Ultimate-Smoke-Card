@@ -236,7 +236,17 @@ class UltimateSmokeCardEditor extends HTMLElement {
 
   setConfig(config) {
     this._config = { ...config };
-    if (this._ready) this._render();
+    if (!this._ready) return;
+    // Nooit volledig re-renderen — dat gooit de gebruiker uit het naamveld.
+    // Alleen picker-waarden en naamveld stil bijwerken.
+    ["smoke", "temperature", "battery"].forEach(field => {
+      const picker = this.querySelector("#slot-" + field + " ha-entity-picker");
+      if (picker) picker.value = this._config[field] || "";
+    });
+    const nameInput = this.querySelector("input[data-field=name]");
+    if (nameInput && nameInput !== document.activeElement) {
+      nameInput.value = this._config.name || "";
+    }
   }
 
   _fire() {
