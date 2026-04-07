@@ -221,19 +221,22 @@ customElements.define('ultimate-smoke-card', UltimateSmokeCard);
 class UltimateSmokeCardEditor extends HTMLElement {
   constructor() {
     super();
-    this._config = {};
-    this._hass   = null;
+    this._config  = {};
+    this._hass    = null;
+    this._ready   = false; // wordt true zodra ha-entity-picker geladen is
   }
 
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
-    if (first) this._render();
+    // Geef bestaande pickers de nieuwe hass mee
+    this.querySelectorAll('ha-entity-picker').forEach(p => { p.hass = hass; });
+    if (first) this._init();
   }
 
   setConfig(config) {
     this._config = { ...config };
-    if (this._hass) this._render();
+    if (this._ready) this._render();
   }
 
   _fire() {
@@ -243,44 +246,49 @@ class UltimateSmokeCardEditor extends HTMLElement {
     }));
   }
 
-  _entities(domain) {
-    if (!this._hass) return [];
-    return Object.entries(this._hass.states)
-      .filter(([id]) => id.startsWith(domain + '.'))
-      .map(([id, st]) => ({ id, name: st.attributes?.friendly_name || id }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+  // Laad HA card helpers (bevat ha-entity-picker) en render daarna
+  async _init() {
+    if (window.loadCardHelpers) {
+      await window.loadCardHelpers();
+    }
+    // Wacht tot ha-entity-picker echt geregistreerd is
+    await customElements.whenDefined('ha-entity-picker');
+    this._ready = true;
+    this._render();
   }
 
-  _selectHTML(field, domain, label) {
-    const options = this._entities(domain);
-    const val     = this._config[field] || '';
-    return `
-      <label class="label">${label}</label>
-      <select class="sel" data-field="${field}">
-        <option value="">-- Kies entity --</option>
-        ${options.map(({ id, name }) =>
-          `<option value="${id}" ${id === val ? 'selected' : ''}>${name}</option>`
-        ).join('')}
-      </select>`;
+  // Maak een ha-entity-picker aan en voeg hem toe aan een slot-element
+  _makePicker(slot, field, domains) {
+    slot.innerHTML = '';
+    const picker = document.createElement('ha-entity-picker');
+    picker.hass             = this._hass;
+    picker.value            = this._config[field] || '';
+    picker.includeDomains   = domains;
+    picker.allowCustomEntity = false;
+    picker.style.cssText    = 'display:block;width:100%';
+    picker.addEventListener('value-changed', e => {
+      this._config[field] = e.detail.value || undefined;
+      this._fire();
+    });
+    slot.appendChild(picker);
   }
 
   _render() {
-    if (!this._hass) return;
+    if (!this._hass || !this._ready) return;
     const cfg = this._config;
 
     this.innerHTML = `
       <style>
-        *  { box-sizing: border-box; }
+        * { box-sizing: border-box; }
         .row { margin-bottom: 16px; }
         .label { display: block; font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--secondary-text-color); margin-bottom: 6px; }
-        select, input[type=text] {
+        input[type=text] {
           width: 100%; padding: 8px 10px;
           border: 1px solid var(--divider-color, #ddd); border-radius: 8px;
           background: var(--card-background-color, #fff);
           color: var(--primary-text-color); font-size: 14px;
-          appearance: none; -webkit-appearance: none;
         }
-        select:focus, input[type=text]:focus { outline: none; border-color: var(--primary-color); }
+        input[type=text]:focus { outline: none; border-color: var(--primary-color); }
         .hint { font-size: 12px; color: var(--secondary-text-color); margin-top: 4px; }
       </style>
 
@@ -290,25 +298,26 @@ class UltimateSmokeCardEditor extends HTMLElement {
       </div>
 
       <div class="row">
-        ${this._selectHTML('smoke', 'binary_sensor', 'Rookmelder (binary_sensor)')}
-        <p class="hint">Verplicht — de sensor die rook detecteert.</p>
+        <label class="label">Rookmelder (binary_sensor) — verplicht</label>
+        <div id="slot-smoke"></div>
+        <p class="hint">De sensor die rook detecteert.</p>
       </div>
 
       <div class="row">
-        ${this._selectHTML('temperature', 'sensor', 'Temperatuur sensor (optioneel)')}
+        <label class="label">Temperatuur sensor — optioneel</label>
+        <div id="slot-temperature"></div>
       </div>
 
       <div class="row">
-        ${this._selectHTML('battery', 'sensor', 'Batterij sensor (optioneel)')}
+        <label class="label">Batterij sensor — optioneel</label>
+        <div id="slot-battery"></div>
       </div>
     `;
 
-    this.querySelectorAll('select.sel').forEach(sel => {
-      sel.addEventListener('change', e => {
-        this._config[e.target.dataset.field] = e.target.value || undefined;
-        this._fire();
-      });
-    });
+    // HA entity pickers invoegen
+    this._makePicker(this.querySelector('#slot-smoke'),       'smoke',       ['binary_sensor']);
+    this._makePicker(this.querySelector('#slot-temperature'), 'temperature', ['sensor']);
+    this._makePicker(this.querySelector('#slot-battery'),     'battery',     ['sensor']);
 
     this.querySelector('input[data-field=name]').addEventListener('input', e => {
       this._config.name = e.target.value;
